@@ -11,6 +11,7 @@ public class CharacterMovementScript : MonoBehaviour
     public float XTerminalVelocity = 54.0f;
     public float MaxMovement = 10.0f;
     public float MaxAirMovement = 5.0f;
+    public float JumpVelocity = 5.0f;
     [Range(0.0f, 50.0f)]
     public float Friction = 30.0f;
     public float AirFriction = 15.0f;
@@ -24,13 +25,15 @@ public class CharacterMovementScript : MonoBehaviour
     // controls
     public KeyCode Jump = KeyCode.Space;
     private bool _jumpKey = false;
+    private bool _lastJumpKey = false;
     public KeyCode Left = KeyCode.A;
     private bool _leftKey = false;
     public KeyCode Right = KeyCode.D;
     private bool _rightKey = false;
-    private float _jumpAlloc = 0.1f;
-    private float _elapsedTimeForJump = 0.0f;
-    private bool _canJump = false;
+    private float _fallingTimeLimit = 0.1f;
+    private float _elapsedFallingTime = 0.0f;
+    private float _jumpingTimeLimit = 0.3f;
+    private float _elapsedJumpingTime = 0.0f;
 
     // internal physics variables
     Vector2 _velocityVector = new Vector2(5.0f, 10.0f);
@@ -57,6 +60,7 @@ public class CharacterMovementScript : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
+        // TODO: Urge to rethink this key input system. maybe make a queue of key inputs and have them resolved every fixedupdate.
         _leftKey = (_leftKey && !Input.GetKeyUp(Left)) || Input.GetKeyDown(Left);
         _rightKey = (_rightKey && !Input.GetKeyUp(Right)) || Input.GetKeyDown(Right);
         _jumpKey = (_jumpKey && !Input.GetKeyUp(Jump)) || Input.GetKeyDown(Jump);
@@ -123,38 +127,10 @@ public class CharacterMovementScript : MonoBehaviour
                 // Apply gravity
                 _velocityVector.y -= GravityAcceleration * Time.deltaTime;
                 
-                // Make it so that the character slows x vel in the air for better control
-                // slow down if no sideways movement keys are being pressed
-                
-                if (!(_leftKey ^ _rightKey))
-                {
-                    // this is stupid
-                    // _velocityVector.x = Mathf.Abs(_velocityVector.x) - AirFriction > 0.0f ? _velocityVector.x - Mathf.Sign(_velocityVector.x) * Friction * Time.deltaTime : 0.0f;
-                    if (Mathf.Abs(_velocityVector.x) - (AirFriction * Time.deltaTime) > 0.0f)
-                    {
-                        _velocityVector.x -= Mathf.Sign(_velocityVector.x) * AirFriction * Time.deltaTime;
-                    }
-                    else
-                    {
-                        _velocityVector.x = 0.0f;
-                    }
-                }
-                // else, character can move, albiet at a different rate while in mid-air
-                else
-                {
-                    // simpler in the air than on the ground, cos no need to worry about the y, that'll just be sorted out by gravity
-                    if (_leftKey && !(_velocityVector.x < -MaxAirMovement))
-                    {
-                        _velocityVector.x -= AirAcceleration * Time.deltaTime;
-                    }
-                    else if (_rightKey && !(_velocityVector.x > MaxAirMovement))
-                    {
-                        _velocityVector.x += AirAcceleration * Time.deltaTime;
-                    }
-                }
+                AirXControl();
 
                 // for jumping, make this so that there is a period of time where the character is falling after being on a platform (saw this in a video once)
-                _elapsedTimeForJump += Time.deltaTime;
+                _elapsedFallingTime += Time.deltaTime;
 
                 Move();
                 StateTransition();
@@ -193,7 +169,19 @@ public class CharacterMovementScript : MonoBehaviour
                 StateTransition();
                 break;
             case "Jumping":
+                // we want to only take into account the slope when the character is sliding on a slope, otherwise, the character should jump straight upwards
+                if (Mathf.Abs(_groundSlope.y) <= (Mathf.Cos((MaxWalkableSlopeAngle - 5) * Mathf.Deg2Rad)))
+                {
+                    _velocityVector.y = JumpVelocity;
+                    AirXControl();
+                }
+                // TODO: we want different behavior from a steep slope. implement here...
+                else
+                {
+                }
 
+                // keep tracking the ammount of time the character spends jumping. shorter taps means shorter hops, long presses means high leaps.
+                _elapsedJumpingTime += Time.deltaTime;
                 
                 Move();
                 StateTransition();
@@ -202,6 +190,39 @@ public class CharacterMovementScript : MonoBehaviour
                 Debug.LogError(string.Format("Invalid state {0} in {1}.CharacterMovementScript", _movementState, this.name));
                 _movementState = "Idle";
                 break;
+        }
+    }
+
+    ///<summary>This is to control x velocity while the character is in the air. Jumping and Falling use this.</summary>
+    private void AirXControl()
+    {
+        // Make it so that the character slows x vel in the air for better control
+        // slow down if no sideways movement keys are being pressed
+        if (!(_leftKey ^ _rightKey))
+        {
+            // this is stupid
+            // _velocityVector.x = Mathf.Abs(_velocityVector.x) - AirFriction > 0.0f ? _velocityVector.x - Mathf.Sign(_velocityVector.x) * Friction * Time.deltaTime : 0.0f;
+            if (Mathf.Abs(_velocityVector.x) - (AirFriction * Time.deltaTime) > 0.0f)
+            {
+                _velocityVector.x -= Mathf.Sign(_velocityVector.x) * AirFriction * Time.deltaTime;
+            }
+            else
+            {
+                _velocityVector.x = 0.0f;
+            }
+        }
+        // else, character can move, albiet at a different rate while in mid-air
+        else
+        {
+            // simpler in the air than on the ground, cos no need to worry about the y, that'll just be sorted out by gravity
+            if (_leftKey && !(_velocityVector.x < -MaxAirMovement))
+            {
+                _velocityVector.x -= AirAcceleration * Time.deltaTime;
+            }
+            else if (_rightKey && !(_velocityVector.x > MaxAirMovement))
+            {
+                _velocityVector.x += AirAcceleration * Time.deltaTime;
+            }
         }
     }
 
@@ -258,9 +279,10 @@ public class CharacterMovementScript : MonoBehaviour
                 {
                     _movementState = "Sliding";
                 }
-                else if (_jumpKey && _elapsedTimeForJump <= _jumpAlloc)
+                else if (_jumpKey && _elapsedFallingTime <= _fallingTimeLimit)
                 {
                     _movementState = "Jumping";
+                    _elapsedFallingTime = 0.0f;
                 }
                 break;
             case "Sliding":
@@ -272,15 +294,17 @@ public class CharacterMovementScript : MonoBehaviour
                 {
                     _movementState = "Falling";
                 }
+                // TODO: on a steep slope, the character shouldnt automatically jump. only when the jump key is pressed for the first time should the character jump
                 else if (_jumpKey)
                 {
                     _movementState = "Jumping";
                 }
                 break;
             case "Jumping":
-                if (!_jumpKey)
+                if (!_jumpKey || _hadCollision || _elapsedJumpingTime >= _jumpingTimeLimit)
                 {
                     _movementState = "Falling";
+                    _elapsedJumpingTime = 0.0f;
                 }
                 break;
             default:
