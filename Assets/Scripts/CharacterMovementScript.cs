@@ -11,7 +11,7 @@ public class CharacterMovementScript : MonoBehaviour
     public float XTerminalVelocity = 54.0f;
     public float MaxMovement = 10.0f;
     public float MaxAirMovement = 5.0f;
-    public float JumpVelocity = 5.0f;
+    public float JumpVelocity = 2.5f;
     [Range(0.0f, 50.0f)]
     public float Friction = 30.0f;
     public float AirFriction = 15.0f;
@@ -24,16 +24,15 @@ public class CharacterMovementScript : MonoBehaviour
 
     // controls
     public KeyCode Jump = KeyCode.Space;
-    private bool _jumpKey = false;
-    private bool _lastJumpKey = false;
     public KeyCode Left = KeyCode.A;
-    private bool _leftKey = false;
     public KeyCode Right = KeyCode.D;
-    private bool _rightKey = false;
-    private float _fallingTimeLimit = 0.1f;
-    private float _elapsedFallingTime = 0.0f;
-    private float _jumpingTimeLimit = 0.3f;
-    private float _elapsedJumpingTime = 0.0f;
+    private (bool Jump, bool Left, bool Right) _keyPressTuple = (false, false, false);
+    private (int Jump, bool Left, bool Right) _keyActionTuple = (0, false, false);
+    public int JumpFrameForgiveness = 3;
+    public int JumpFrames = 5;
+    private int _elapsedFallingFrames = 0;
+    private int _elapsedJumpingFrames = 0;
+    
 
     // internal physics variables
     Vector2 _velocityVector = new Vector2(5.0f, 10.0f);
@@ -60,15 +59,25 @@ public class CharacterMovementScript : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
-        // TODO: Urge to rethink this key input system. maybe make a queue of key inputs and have them resolved every fixedupdate.
-        _leftKey = (_leftKey && !Input.GetKeyUp(Left)) || Input.GetKeyDown(Left);
-        _rightKey = (_rightKey && !Input.GetKeyUp(Right)) || Input.GetKeyDown(Right);
-        _jumpKey = (_jumpKey && !Input.GetKeyUp(Jump)) || Input.GetKeyDown(Jump);
-        // Debug.Log(string.Format("A: {0}, D: {1}", _leftKey, _rightKey));
+        // these values are updated every frame update to figure out whether or not a key is being pressed
+        _keyPressTuple.Jump = (_keyPressTuple.Jump && !Input.GetKeyUp(Jump)) || Input.GetKeyDown(Jump);
+        _keyPressTuple.Left = (_keyPressTuple.Left && !Input.GetKeyUp(Left)) || Input.GetKeyDown(Left);
+        _keyPressTuple.Right = (_keyPressTuple.Right && !Input.GetKeyUp(Right)) || Input.GetKeyDown(Right);
+        
+        // _keyActionTuple holds the key inputs that need to be resolved. letting go of a key isn't enough to set its "pressed value" to false, it must be resolved in a fixedUpdate frame.
+        _keyActionTuple.Left = _keyActionTuple.Left || _keyPressTuple.Left;
+        _keyActionTuple.Right = _keyActionTuple.Right || _keyPressTuple.Right;
+        // pressing the jump key right before hitting the ground should still make the character preform a jump. a frame forgivness is allotted to ensure this.
+        if (_keyPressTuple.Jump) { _keyActionTuple.Jump = JumpFrameForgiveness; }
+        // Debug.Log("Space: " + _keyPressTuple.Jump);
+        // Debug.Log("Jump: " + _keyActionTuple.Jump);
     }
 
     void FixedUpdate()
     {
+        // decide what movement state the character needs to be in
+        StateTransition();
+
         _hadCollision = false;
         // Debug.Log(_movementState);
         // check movement state and resolve accordingly
@@ -99,29 +108,27 @@ public class CharacterMovementScript : MonoBehaviour
                 }
 
                 Move();
-                StateTransition();
                 break;
             case "Walking":
                 // use the version of the slope that always points left to make movement calculations easier
                 // the character should keep momentum gained outside of pressing left/right. only when he stops will the character lose that momentum
                 
                 // if going left, and isnt going left faster than speed limit
-                if (_leftKey && !(xDirectionSign * _velocityVector.magnitude < -MaxMovement))
+                if (_keyActionTuple.Left && !(xDirectionSign * _velocityVector.magnitude < -MaxMovement))
                 {
                     Vector2 accelVector = -Acceleration * leftPointingGroundSlope;
                     _velocityVector.x += accelVector.x * Time.deltaTime;
                     _velocityVector.y += accelVector.y * Time.deltaTime;
                 }
                 // if going right, and isnt going right faster than speed limit
-                else if (_rightKey && !(xDirectionSign * _velocityVector.magnitude > MaxMovement))
+                else if (_keyActionTuple.Right && !(xDirectionSign * _velocityVector.magnitude > MaxMovement))
                 {
                     Vector2 accelVector = Acceleration * leftPointingGroundSlope;
                     _velocityVector.x += accelVector.x * Time.deltaTime;
                     _velocityVector.y += accelVector.y * Time.deltaTime;
                 }
-                
+
                 Move();
-                StateTransition();
                 break;
             case "Falling":
                 // Apply gravity
@@ -130,18 +137,17 @@ public class CharacterMovementScript : MonoBehaviour
                 AirXControl();
 
                 // for jumping, make this so that there is a period of time where the character is falling after being on a platform (saw this in a video once)
-                _elapsedFallingTime += Time.deltaTime;
+                _elapsedFallingFrames++;
 
                 Move();
-                StateTransition();
                 break;
             case "Sliding":
                 float slopeDirectionSign = Mathf.Sign(_groundSlope.x);
                 float slowSlopeTargetVel = Mathf.Abs(SlowSlope * velocityDirection.y);
 
                 // if the correct keys to slow the character arent being pressed or the character is traveling up the slope, gravity should continue pulling them down the slope
-                if (!((slopeDirectionSign > 0 && _leftKey && _velocityVector.magnitude * xDirectionSign >= slowSlopeTargetVel) || 
-                    (slopeDirectionSign < 0 && _rightKey && _velocityVector.magnitude * xDirectionSign <= -slowSlopeTargetVel)))
+                if (!((slopeDirectionSign > 0 && _keyActionTuple.Left && _velocityVector.magnitude * xDirectionSign >= slowSlopeTargetVel) || 
+                    (slopeDirectionSign < 0 && _keyActionTuple.Right && _velocityVector.magnitude * xDirectionSign <= -slowSlopeTargetVel)))
                 {
                     // find the magnitude of sliding based on the steepness of the slope; steeper slopes mean faster sliding
                     float slidingAccelerationMagnitude = Mathf.Abs(GravityAcceleration * Mathf.Cos((Mathf.PI / 2) - Mathf.Asin(_groundSlope.y)));
@@ -151,14 +157,13 @@ public class CharacterMovementScript : MonoBehaviour
                     _velocityVector.y += slidingAccelerationVector.y * Time.deltaTime;
                 }
                 // else, slow the character if the correct keys are being pressed
-                else if (_leftKey && !(slopeDirectionSign * _velocityVector.magnitude < slowSlopeTargetVel))
+                else if (_keyActionTuple.Left && !(slopeDirectionSign * _velocityVector.magnitude < slowSlopeTargetVel))
                 {
                     Vector2 accelVector = -SlopeAcceleration * leftPointingGroundSlope;
                     _velocityVector.x += accelVector.x * Time.deltaTime;
                     _velocityVector.y += accelVector.y * Time.deltaTime;
                 }
-                // 
-                else if (_rightKey && !(slopeDirectionSign * _velocityVector.magnitude > -slowSlopeTargetVel))
+                else if (_keyActionTuple.Right && !(slopeDirectionSign * _velocityVector.magnitude > -slowSlopeTargetVel))
                 {
                     Vector2 accelVector = SlopeAcceleration * leftPointingGroundSlope;
                     _velocityVector.x += accelVector.x * Time.deltaTime;
@@ -166,13 +171,14 @@ public class CharacterMovementScript : MonoBehaviour
                 }
 
                 Move();
-                StateTransition();
                 break;
+            // TODO: Redo variable jump height mechanics, cos they are finicky
             case "Jumping":
                 // we want to only take into account the slope when the character is sliding on a slope, otherwise, the character should jump straight upwards
                 if (Mathf.Abs(_groundSlope.y) <= (Mathf.Cos((MaxWalkableSlopeAngle - 5) * Mathf.Deg2Rad)))
                 {
-                    _velocityVector.y = JumpVelocity;
+                    // as the player holds the jump key, the character gains more momentum, making a varied jump
+                    _velocityVector.y = _elapsedJumpingFrames * JumpVelocity;
                     AirXControl();
                 }
                 // TODO: we want different behavior from a steep slope. implement here...
@@ -181,16 +187,19 @@ public class CharacterMovementScript : MonoBehaviour
                 }
 
                 // keep tracking the ammount of time the character spends jumping. shorter taps means shorter hops, long presses means high leaps.
-                _elapsedJumpingTime += Time.deltaTime;
-                
+                _elapsedJumpingFrames++;
+
                 Move();
-                StateTransition();
+                _keyActionTuple.Jump = 0;
                 break;
             default:
                 Debug.LogError(string.Format("Invalid state {0} in {1}.CharacterMovementScript", _movementState, this.name));
                 _movementState = "Idle";
                 break;
         }
+
+        // resolve action tuple
+        _keyActionTuple = (_keyActionTuple.Jump != 0 ? _keyActionTuple.Jump - 1 : 0, false, false);
     }
 
     ///<summary>This is to control x velocity while the character is in the air. Jumping and Falling use this.</summary>
@@ -198,7 +207,7 @@ public class CharacterMovementScript : MonoBehaviour
     {
         // Make it so that the character slows x vel in the air for better control
         // slow down if no sideways movement keys are being pressed
-        if (!(_leftKey ^ _rightKey))
+        if (!(_keyActionTuple.Left ^ _keyActionTuple.Right))
         {
             // this is stupid
             // _velocityVector.x = Mathf.Abs(_velocityVector.x) - AirFriction > 0.0f ? _velocityVector.x - Mathf.Sign(_velocityVector.x) * Friction * Time.deltaTime : 0.0f;
@@ -215,11 +224,11 @@ public class CharacterMovementScript : MonoBehaviour
         else
         {
             // simpler in the air than on the ground, cos no need to worry about the y, that'll just be sorted out by gravity
-            if (_leftKey && !(_velocityVector.x < -MaxAirMovement))
+            if (_keyActionTuple.Left && !(_velocityVector.x < -MaxAirMovement))
             {
                 _velocityVector.x -= AirAcceleration * Time.deltaTime;
             }
-            else if (_rightKey && !(_velocityVector.x > MaxAirMovement))
+            else if (_keyActionTuple.Right && !(_velocityVector.x > MaxAirMovement))
             {
                 _velocityVector.x += AirAcceleration * Time.deltaTime;
             }
@@ -243,11 +252,11 @@ public class CharacterMovementScript : MonoBehaviour
                 {
                     _movementState = "Sliding";
                 }
-                else if (_leftKey ^ _rightKey)
+                else if (_keyActionTuple.Left ^ _keyActionTuple.Right)
                 {
                     _movementState = "Walking";
                 }
-                else if (_jumpKey)
+                else if (_keyActionTuple.Jump > 0)
                 {
                     _movementState = "Jumping";
                 }
@@ -261,11 +270,11 @@ public class CharacterMovementScript : MonoBehaviour
                 {
                     _movementState = "Sliding";
                 }
-                else if (!(_leftKey ^ _rightKey))
+                else if (!(_keyActionTuple.Left ^ _keyActionTuple.Right))
                 {
                     _movementState = "Idle";
                 }
-                else if (_jumpKey)
+                else if (_keyActionTuple.Jump > 0)
                 {
                     _movementState = "Jumping";
                 }
@@ -279,10 +288,10 @@ public class CharacterMovementScript : MonoBehaviour
                 {
                     _movementState = "Sliding";
                 }
-                else if (_jumpKey && _elapsedFallingTime <= _fallingTimeLimit)
+                else if (_keyActionTuple.Jump > 0 && _elapsedFallingFrames <= JumpFrameForgiveness)
                 {
                     _movementState = "Jumping";
-                    _elapsedFallingTime = 0.0f;
+                    _elapsedFallingFrames = 0;
                 }
                 break;
             case "Sliding":
@@ -295,16 +304,16 @@ public class CharacterMovementScript : MonoBehaviour
                     _movementState = "Falling";
                 }
                 // TODO: on a steep slope, the character shouldnt automatically jump. only when the jump key is pressed for the first time should the character jump
-                else if (_jumpKey)
+                else if (_keyActionTuple.Jump > 0)
                 {
                     _movementState = "Jumping";
                 }
                 break;
             case "Jumping":
-                if (!_jumpKey || _hadCollision || _elapsedJumpingTime >= _jumpingTimeLimit)
+                if (!(_keyActionTuple.Jump > 0) || _elapsedJumpingFrames > JumpFrames)
                 {
                     _movementState = "Falling";
-                    _elapsedJumpingTime = 0.0f;
+                    _elapsedJumpingFrames = 0;
                 }
                 break;
             default:
