@@ -5,7 +5,7 @@ using UnityEngine;
 public class CharacterMovementScript : MonoBehaviour
 {
     // physics
-    [Range(0.0f, 20.0f)]
+    [Range(0.0f, 50.0f)]
     public float GravityAcceleration = 9.8f;
     public float YTerminalVelocity = 54.0f;
     public float XTerminalVelocity = 54.0f;
@@ -27,11 +27,13 @@ public class CharacterMovementScript : MonoBehaviour
     public KeyCode Left = KeyCode.A;
     public KeyCode Right = KeyCode.D;
     private (bool Jump, bool Left, bool Right) _keyPressTuple = (false, false, false);
-    private (int Jump, bool Left, bool Right) _keyActionTuple = (0, false, false);
+    private (bool Jump, bool Left, bool Right) _keyActionTuple = (false, false, false);
     public int JumpFrameForgiveness = 3;
-    public int JumpFrames = 5;
+    [Range(0.0f, 1.0f)]
+    public float JumpReleaseMultiplyer = 0.5f;
+    private bool _hasJumped = false;
     private int _elapsedFallingFrames = 0;
-    private int _elapsedJumpingFrames = 0;
+    private int _framesSinceJumpPressed = 0;
     
 
     // internal physics variables
@@ -65,12 +67,9 @@ public class CharacterMovementScript : MonoBehaviour
         _keyPressTuple.Right = (_keyPressTuple.Right && !Input.GetKeyUp(Right)) || Input.GetKeyDown(Right);
         
         // _keyActionTuple holds the key inputs that need to be resolved. letting go of a key isn't enough to set its "pressed value" to false, it must be resolved in a fixedUpdate frame.
+        _keyActionTuple.Jump = _keyPressTuple.Jump || _keyPressTuple.Jump;
         _keyActionTuple.Left = _keyActionTuple.Left || _keyPressTuple.Left;
         _keyActionTuple.Right = _keyActionTuple.Right || _keyPressTuple.Right;
-        // pressing the jump key right before hitting the ground should still make the character preform a jump. a frame forgivness is allotted to ensure this.
-        if (_keyPressTuple.Jump) { _keyActionTuple.Jump = JumpFrameForgiveness; }
-        // Debug.Log("Space: " + _keyPressTuple.Jump);
-        // Debug.Log("Jump: " + _keyActionTuple.Jump);
     }
 
     // States so far:
@@ -113,6 +112,7 @@ public class CharacterMovementScript : MonoBehaviour
                     _velocityVector.y = 0.0f;
                 }
 
+                JumpControl();
                 Move();
                 break;
             case "Walking":
@@ -134,17 +134,18 @@ public class CharacterMovementScript : MonoBehaviour
                     _velocityVector.y += accelVector.y * Time.deltaTime;
                 }
 
+                JumpControl();
                 Move();
                 break;
             case "Falling":
                 // Apply gravity
                 _velocityVector.y -= GravityAcceleration * Time.deltaTime;
                 
-                AirXControl();
-
                 // for jumping, make this so that there is a period of time where the character is falling after being on a platform (saw this in a video once)
                 _elapsedFallingFrames++;
 
+                AirXControl();
+                JumpControl(); 
                 Move();
                 break;
             case "Sliding":
@@ -176,27 +177,8 @@ public class CharacterMovementScript : MonoBehaviour
                     _velocityVector.y += accelVector.y * Time.deltaTime;
                 }
 
+                JumpControl();
                 Move();
-                break;
-            // TODO: Redo variable jump height mechanics, cos they are finicky
-            case "Jumping":
-                // we want to only take into account the slope when the character is sliding on a slope, otherwise, the character should jump straight upwards
-                if (Mathf.Abs(_groundSlope.y) <= (Mathf.Cos((MaxWalkableSlopeAngle - 5) * Mathf.Deg2Rad)))
-                {
-                    // as the player holds the jump key, the character gains more momentum, making a varied jump
-                    _velocityVector.y = _elapsedJumpingFrames * JumpVelocity;
-                    AirXControl();
-                }
-                // TODO: we want different behavior from a steep slope. implement here...
-                else
-                {
-                }
-
-                // keep tracking the ammount of time the character spends jumping. shorter taps means shorter hops, long presses means high leaps.
-                _elapsedJumpingFrames++;
-
-                Move();
-                _keyActionTuple.Jump = 0;
                 break;
             default:
                 Debug.LogError(string.Format("Invalid state {0} in {1}.CharacterMovementScript", _movementState, this.name));
@@ -205,7 +187,7 @@ public class CharacterMovementScript : MonoBehaviour
         }
 
         // resolve action tuple
-        _keyActionTuple = (_keyActionTuple.Jump != 0 ? _keyActionTuple.Jump - 1 : 0, false, false);
+        _keyActionTuple = (false, false, false);
     }
 
     ///<summary>This is to control x velocity while the character is in the air. Jumping and Falling use this.</summary>
@@ -241,6 +223,31 @@ public class CharacterMovementScript : MonoBehaviour
         }
     }
 
+    private void JumpControl()
+    {
+        if (_keyActionTuple.Jump || _framesSinceJumpPressed <= JumpFrameForgiveness)
+        {
+            // first frame in jump
+            if ((_movementState == "Falling" && _elapsedFallingFrames <= JumpFrameForgiveness && _velocityVector.y < 0) ||
+                (_movementState == "Walking" || _movementState == "Idle"))
+            {
+                _velocityVector.y = JumpVelocity;
+                _hasJumped = true;
+            }
+        }
+        if (!_keyActionTuple.Jump)
+        {
+            Debug.Log("rekaea");
+            if (_movementState == "Falling" && _hasJumped && _velocityVector.y > 0)
+            {
+                _velocityVector.y *= JumpReleaseMultiplyer;
+            }
+            _framesSinceJumpPressed++;
+            _hasJumped = false;
+        }
+        
+    }
+
     ///<summary>Transitions the character's movement state. Only changes <paramref name="_movementState"/></summary>
     private void StateTransition()
     {
@@ -262,10 +269,6 @@ public class CharacterMovementScript : MonoBehaviour
                 {
                     _movementState = "Walking";
                 }
-                else if (_keyActionTuple.Jump > 0)
-                {
-                    _movementState = "Jumping";
-                }
                 break;
             case "Walking":
                 if (groundCheck == "Air")
@@ -280,10 +283,6 @@ public class CharacterMovementScript : MonoBehaviour
                 {
                     _movementState = "Idle";
                 }
-                else if (_keyActionTuple.Jump > 0)
-                {
-                    _movementState = "Jumping";
-                }
                 break;
             case "Falling":
                 if (groundCheck == "Flat" || groundCheck == "ShallowSlope")
@@ -294,11 +293,6 @@ public class CharacterMovementScript : MonoBehaviour
                 {
                     _movementState = "Sliding";
                 }
-                else if (_keyActionTuple.Jump > 0 && _elapsedFallingFrames <= JumpFrameForgiveness)
-                {
-                    _movementState = "Jumping";
-                    _elapsedFallingFrames = 0;
-                }
                 break;
             case "Sliding":
                 if (groundCheck == "Flat" || groundCheck == "ShallowSlope")
@@ -308,18 +302,6 @@ public class CharacterMovementScript : MonoBehaviour
                 else if (groundCheck == "Air")
                 {
                     _movementState = "Falling";
-                }
-                // TODO: on a steep slope, the character shouldnt automatically jump. only when the jump key is pressed for the first time should the character jump
-                else if (_keyActionTuple.Jump > 0)
-                {
-                    _movementState = "Jumping";
-                }
-                break;
-            case "Jumping":
-                if (!(_keyActionTuple.Jump > 0) || _elapsedJumpingFrames > JumpFrames)
-                {
-                    _movementState = "Falling";
-                    _elapsedJumpingFrames = 0;
                 }
                 break;
             default:
