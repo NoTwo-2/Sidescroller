@@ -1862,15 +1862,20 @@ MonoBehaviour:
   XTerminalVelocity: 54
   MaxMovement: 10
   MaxAirMovement: 5
+  JumpVelocity: 2.5
   Friction: 50
   AirFriction: 25
   Acceleration: 50
   AirAcceleration: 25
+  SlopeAcceleration: 10
   GroundCheckDistance: 1
   MaxWalkableSlopeAngle: 45
+  SlowSlope: 5
   Jump: 32
   Left: 97
   Right: 100
+  JumpFrameForgiveness: 3
+  JumpFrames: 5
 --- !u!1 &594640186
 GameObject:
   m_ObjectHideFlags: 0

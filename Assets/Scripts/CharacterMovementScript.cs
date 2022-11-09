@@ -73,6 +73,12 @@ public class CharacterMovementScript : MonoBehaviour
         // Debug.Log("Jump: " + _keyActionTuple.Jump);
     }
 
+    // States so far:
+    // Idle: the character is standing still, not pressing any movement keys. If the character has velocity, the character will slide to a halt.
+    // Walking: the character is travelling along walkable ground from influence of the movement keys.
+    // Falling: the character is in freefall, at the whims of gravity.
+    // Sliding: the character is sliding down a slope too steep to gain stable footing on.
+
     void FixedUpdate()
     {
         // decide what movement state the character needs to be in
