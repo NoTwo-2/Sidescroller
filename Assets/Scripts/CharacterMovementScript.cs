@@ -115,6 +115,8 @@ public class CharacterMovementScript : MonoBehaviour
                 JumpControl();
                 Move();
                 break;
+            // TODO: instead of a hard set speed limit, let the character approach terminal velocity, but have velocity increase logarithmically. 
+            // gaining speed will feel better and more runway will always mean a faster speed.
             case "Walking":
                 // use the version of the slope that always points left to make movement calculations easier
                 // the character should keep momentum gained outside of pressing left/right. only when he stops will the character lose that momentum
@@ -234,6 +236,7 @@ public class CharacterMovementScript : MonoBehaviour
                 _velocityVector.y = JumpVelocity;
                 _hasJumped = true;
             }
+            // TODO: jumping on a steep slope should have different behavior. add this here.
         }
         if (!_keyActionTuple.Jump)
         {
